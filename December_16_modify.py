@@ -2,7 +2,7 @@
 # 导入必要的模块
 import clr
 import ctypes
-from tkinter.constants import BOTTOM, W
+from tkinter.constants import BOTTOM, TRUE, W
 import matplotlib
 from pyqtgraph.functions import colorDistance
 matplotlib.use('Qt5Agg')
@@ -135,6 +135,17 @@ class My_Main_window(QtWidgets.QMainWindow):
         self.coordinate = []
         self.overall = []
         self.Amplitude = []
+
+
+        self.thickness_setup = float(datafile.GetSetup().GetScanPlan().GetSpecimen().GetGeometry().GetThickness())
+        print(f"thickness_setup is {self.thickness_setup}")
+        print(dir(datafile.GetSetup().GetScanPlan().GetSpecimen().GetGeometry()))
+        self.Length_setup = datafile.GetSetup().GetScanPlan().GetSpecimen().GetGeometry().GetLength()
+        print(f'Lengh_setup is: {self.Length_setup}')
+        self.width_setup = datafile.GetSetup().GetScanPlan().GetSpecimen().GetGeometry().GetWidth()
+        print(f'width_setup is {self.width_setup}')
+
+
         X =[]
         Y =[]
         
@@ -148,12 +159,16 @@ class My_Main_window(QtWidgets.QMainWindow):
         AScanBuffer = data.GetAscanBuffer(key)
         A_Descriptor = AScanBuffer.GetDescriptor()
         AmplitudeAxis = A_Descriptor.GetAmplitudeAxis()
+        coefficient_to_amplitude_pct = float(AmplitudeAxis.GetResolution())
         Velocity = A_Descriptor.GetUltrasoundVelocity() * (1.0e3)  #Convert to mm/s
         print('Velocity is : \n', Velocity , 'mm/s')
 
-
-        CKey = C_BufferKeys.GetBufferKey(1) #Gate A  
+        try:
+            CKey = C_BufferKeys.GetBufferKey(1) #Gate A  
+        except:
+            CKey = C_BufferKeys.GetBufferKey(0) #Gate A
         CScanBuffer = data.GetCscanBuffer(CKey)
+
         if CScanBuffer.GetScanCellQuantity() == AScanBuffer.GetScanCellQuantity() and CScanBuffer.GetIndexCellQuantity() == AScanBuffer.GetIndexCellQuantity():
             print("====="*20)
             print("Cscan Scan and Index Qty. == AScan Scan and Index Qty.")
@@ -170,25 +185,16 @@ class My_Main_window(QtWidgets.QMainWindow):
                 distance = (raw_position * 1.0e-9) * Velocity
                 thickness = distance / 2
                 raw_amplitude = CRead.GetAmplitude()
+                amplitude_in_pct = raw_amplitude * coefficient_to_amplitude_pct
                 self.coordinate.append([j*ScanQty_resol,k*IndexQty_resol,thickness])
                 self.overall.append([j*ScanQty_resol,k*IndexQty_resol,thickness,raw_amplitude])
-                self.Amplitude.append(raw_amplitude)
+                self.Amplitude.append(amplitude_in_pct)
         self.dff=pd.DataFrame(self.overall)
         print(self.dff[2].max())
         print("Show the maximum number above")
-        print('Check'*10)
-        location = [124.06,12.6]
-        CRead = CScanBuffer.Read(location[0],location[1])
-        # CRead = CScanBuffer.Read(j,k)
-        raw_position = CRead.GetPosition()
-        distance = (raw_position * 1.0e-9) * Velocity
-        thickness = distance / 2
-        raw_amplitude = CRead.GetAmplitude()
-        print(f'distance is :  {distance}')
-        print(f"thickness is :{thickness}")
-        print(f'raw amplitude is : {raw_amplitude}')
-        print('Check'*10)
+        
         self.result_info_window.append(f"Got the origonal dataframe")
+        print("Got the origonal dataframe")
         self.coordinate = np.array(self.coordinate)
         self.Amplitude = np.array(self.Amplitude)
         self.gate_position = np.array([])
@@ -233,6 +239,9 @@ class My_Main_window(QtWidgets.QMainWindow):
 
     def plot_3(self):
         pinglv = []
+        self.result_info_window.append(f'Width is {self.width_setup}')
+        self.result_info_window.append(f'Length is {self.Length_setup}')
+        self.result_info_window.append(f'Thickness is {self.thickness_setup}')
         #===========================================#
         if np.any(self.gate_position) and np.any(self.gate_amplitude):
             fposs = self.threshold_coordinate
@@ -243,6 +252,7 @@ class My_Main_window(QtWidgets.QMainWindow):
         else:
             fposs = self.coordinate    
             pinglv = np.array((self.Amplitude) / (self.Amplitude.max()))
+            # pinglv = np.array(self.Amplitude)
             print("No threshold",type(fposs))
             print("No threshold",type(pinglv))
 
@@ -268,9 +278,38 @@ class My_Main_window(QtWidgets.QMainWindow):
         self.w.addItem(sp1)
 
         #=============================================================
-        grdx = 350
-        grdy = 150
-        grdz = 75
+        # if self.thickness_setup & self.width_setup & self.Length_setup:
+        #     print('true')
+        # else:
+        # #     print("False")
+
+        if self.Length_setup > self.width_setup:
+            grdx = int(self.Length_setup/100)*100+50
+            grdy = int(self.width_setup/100)*100+50
+            # grdz = 50
+        
+        elif self.Length_setup < self.width_setup:
+            grdx = int(self.width_setup/100)*100+50
+            grdy = int(self.Length_setup/100)*100+50
+            # grdz = 50
+        
+        else:
+            self.result_info_window.append("LMAO")
+            grdx = 350
+            grdy = 150
+        
+        # grdz = 50
+        print(self.thickness_setup)
+        if self.thickness_setup > 50:
+            if int(self.thickness_setup/100) == 0:
+                grdz = self.thickness_setup
+            elif self.thickness_setup > 100:
+                grdz = int(self.thickness_setup/10) * 10 + 20
+        else:
+            grdz = 50
+
+        self.result_info_window.append(f'grdx {grdx}\ngrdy {grdy}')
+
         grid1 = gl.GLGridItem()
         grid1.setSize(x=grdx,y=grdy)
         grid1.setSpacing(x=10, y=10)
@@ -278,17 +317,18 @@ class My_Main_window(QtWidgets.QMainWindow):
         # grid1.setColor((0,255,0,255))
         self.w.addItem(grid1)
         grid2 = gl.GLGridItem()
-        grid2.setSize(x= grdx, y= grdy)
+        grid2.setSize(x= grdx, y= grdz)
         grid2.setSpacing(x=10,y=10)
         grid2.rotate(90,1,0,0)
-        grid2.translate(dx= 0.5 * grdx, dy=0, dz = 0.5 * grdy)
+        grid2.translate(dx= 0.5 * grdx, dy=0, dz = 0.5 * grdz )
         # grid2.setColor((0,255,255,255))
         self.w.addItem(grid2)
+
         grid3 = gl.GLGridItem()
-        grid3.setSize(x= grdy, y= grdy, z=0)
+        grid3.setSize(x= grdz, y= grdy, z=0)
         grid3.setSpacing(x=10,y=10)
         grid3.rotate(90,0,1,0)
-        grid3.translate(dx=0, dy = 0.5*grdy, dz =  0.5*grdy)
+        grid3.translate(dx=0, dy = 0.5*grdy, dz =  0.5*grdz)
         self.w.addItem(grid3)
         print("~End~"*10)
 
