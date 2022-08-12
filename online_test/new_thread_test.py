@@ -1,5 +1,7 @@
+from asyncio.events import BaseDefaultEventLoopPolicy
 from concurrent.futures import process
 from sqlite3 import DatabaseError
+from unicodedata import digit
 import clr
 import ctypes
 import numpy as np
@@ -27,7 +29,7 @@ def process_ascan(result):
     sample_quantity = ascan.GetSampleQuantity()
     AmplitudeSamplingDataRage_min = ascan.GetAmplitudeSamplingDataRange().GetFloatingMin()
     AmplitudeSamplingDataRage_max = ascan.GetAmplitudeSamplingDataRange().GetFloatingMax()
-    print('Amplitude Sampliding unit:' , ascan.GetAmplitudeSamplingDataRange().GetUnit())  #unit is sample
+    # print('Amplitude Sampliding unit:' , ascan.GetAmplitudeSamplingDataRange().GetUnit())  #unit is sample
     AmplitudeSamplingDataRage_resolution = (AmplitudeSamplingDataRage_max-AmplitudeSamplingDataRage_min)/sample_quantity
     AmplitudeDataRange_min = ascan.GetAmplitudeDataRange().GetFloatingMin()
     AmplitudeDataRange_max = ascan.GetAmplitudeDataRange().GetFloatingMax()
@@ -37,18 +39,17 @@ def process_ascan(result):
     TimeDataRange_max = ascan.GetTimeDataRange().GetFloatingMax()
     AscanX_min = TimeDataRange_min * velocity 
     AscanX_max = TimeDataRange_max * velocity
-    print(AscanX_max,AscanX_min, ascan.GetTimeDataRange().GetUnit())  #confirmed to be the nanosecond
+    # print(AscanX_max,AscanX_min, ascan.GetTimeDataRange().GetUnit())  #confirmed to be the nanosecond
     CycleID = thread_result.cycleData.GetCycleId()
     newpnt = ctypes.cast(ascan_ptr.ToInt64(), ctypes.POINTER(ctypes.c_int32))
     DataBytes = np.ctypeslib.as_array(newpnt, (sample_quantity,))  # no internal copy   
-    DataBytes =  list(DataBytes)
     """Raw Data"""
     AScan_multiply_reading = DataBytes * np.array([float(AmplitudeSamplingDataRage_resolution)])   #Convert to percent
     X_axis = np.linspace(AscanX_min,AscanX_max,sample_quantity)  #get the Thickness reading for the X-axis
     # try:
     #     print(CycleID,'Sampling Resol', AmplitudeSamplingDataRage_resolution)
     # except:
-    print(CycleID,max(DataBytes))
+    print(CycleID,np.max(DataBytes))
     # """Setup Threshold"""
     # amp_gate_lower_limit = 45
     # Xaxis_lower_limit = 26
@@ -67,8 +68,6 @@ def process_ascan(result):
     #     print(f'Cycle ID:{CycleID}, Sample Quantity: {sample_quantity}')
     
     
-def print_and_process(A_array,cycid):
-    print('New Process:',cycid,'\n',A_array)
     
 
 
@@ -101,7 +100,35 @@ class FPXDevice(object):
         connector = digitizerTechnology.GetConnectorCollection().GetConnector(connector_index)
         connector_count = digitizerTechnology.GetConnectorCollection().GetCount()
         ultrasoundConfiguration.GetFiringBeamSetCollection().Add(beamSet, connector)
-    
+
+        beam = beamSet.GetBeam(0)
+        print(f'AScan Start:{beam.GetAscanStart()}, AScan Length: {beam.GetAscanLength()}')
+        self.setup_ascan(beam_set=beam)
+
+
+    def setup_ascan(self,beam_set):
+        beam = self.create_beamset()
+        # print(f'Beam setup function: \nAScan Start:{beam.GetAscanStart()}, AScan Length: {beam.GetAscanLength()}')
+        AScanStart_current = beam.GetAscanStart()
+        AScan_length_current = beam.GetAscanLength()
+        Recurrence_current = beam.GetRecurrence()
+        AScanStart = beam.SetAscanStart(AScanStart_current)
+        AscanLength = beam.SetAscanLength(AScan_length_current)
+        Recurrence = beam.SetRecurrence(Recurrence_current)
+        
+
+
+    def create_conventionalUT_beamset_P_and_R(self,pulser_index,receive_index):
+        deviceConfiguration = self.device.GetConfiguration()
+        ultrasoundConfiguration = deviceConfiguration.GetUltrasoundConfiguration()
+        digitizerTechnology = ultrasoundConfiguration.GetDigitizerTechnology(UltrasoundTechnology.Conventional)
+        beamSetFactory = digitizerTechnology.GetBeamSetFactory()
+        beamSet = beamSetFactory.CreateBeamSetConventional("Conventional")
+        pulser = digitizerTechnology.GetConnectorCollection().GetConnector(pulser_index)
+        receiver = digitizerTechnology.GetConnectorCollection().GetConnector(receive_index)
+        ultrasoundConfiguration.GetFiringBeamSetCollection().Add(beamSet,pulser,receiver)
+
+
     def create_pa_beamset(self, connector_index):
         deviceConfiguration = self.device.GetConfiguration()
         ultrasoundConfiguration = deviceConfiguration.GetUltrasoundConfiguration()
@@ -116,7 +143,17 @@ class FPXDevice(object):
         ultrasoundConfiguration.GetFiringBeamSetCollection().Add(beamSet, connector)
         """"""
 
-         
+    def switch_to_50(self):
+        self.acquisition.Stop()
+        self.acquisition.SetRate(50)
+        input('PRESS ENTER TO START TEST')
+        self.acquisition.Start()
+
+    def switch_to_100(self):
+        self.acquisition.Stop()
+        self.acquisition.SetRate(10000)
+        input('PRESS ENTER TO START TEST')
+        self.acquisition.Start()
 
     def init_acquisition(self):
         self.acquisition = IAcquisition.CreateEx(self.device)
@@ -128,11 +165,7 @@ class FPXDevice(object):
             if result.status == IAcquisition.WaitForDataResultEx.Status.DataAvailable:
                 self.process_ascan(result)  #run it in the main tread
                 """run it in another thread"""
-                # sub_thr = Thread(target=process_ascan,args=(result,),daemon=True)
-                # p1 = multiprocessing.Process(target=process_ascan,args=result,daemon=True)
-                # p1.start()
-                # sub_thr.start()
-                # sub_thr.join()
+
         except:
             pass
 
@@ -144,7 +177,7 @@ class FPXDevice(object):
         sample_quantity = ascan.GetSampleQuantity()
         AmplitudeSamplingDataRage_min = ascan.GetAmplitudeSamplingDataRange().GetFloatingMin()
         AmplitudeSamplingDataRage_max = ascan.GetAmplitudeSamplingDataRange().GetFloatingMax()
-        print('Amplitude Sampliding unit:' , ascan.GetAmplitudeSamplingDataRange().GetUnit())  #unit is sample
+        # print('Amplitude Sampliding unit:' , ascan.GetAmplitudeSamplingDataRange().GetUnit())  #unit is sample
         AmplitudeSamplingDataRage_resolution = (AmplitudeSamplingDataRage_max-AmplitudeSamplingDataRage_min)/sample_quantity
         AmplitudeDataRange_min = ascan.GetAmplitudeDataRange().GetFloatingMin()
         AmplitudeDataRange_max = ascan.GetAmplitudeDataRange().GetFloatingMax()
@@ -154,18 +187,19 @@ class FPXDevice(object):
         TimeDataRange_max = ascan.GetTimeDataRange().GetFloatingMax()
         AscanX_min = TimeDataRange_min * velocity 
         AscanX_max = TimeDataRange_max * velocity
-        print(AscanX_max,AscanX_min, ascan.GetTimeDataRange().GetUnit())  #confirmed to be the nanosecond
+        # print(AscanX_max,AscanX_min, ascan.GetTimeDataRange().GetUnit())  #confirmed to be the nanosecond
         CycleID = thread_result.cycleData.GetCycleId()
         newpnt = ctypes.cast(ascan_ptr.ToInt64(), ctypes.POINTER(ctypes.c_int32))
+        
         DataBytes = np.ctypeslib.as_array(newpnt, (sample_quantity,))  # no internal copy   
-        DataBytes =  list(DataBytes)
+        # DataBytes =  list(DataBytes)
         """Raw Data"""
         AScan_multiply_reading = DataBytes * np.array([float(AmplitudeSamplingDataRage_resolution)])   #Convert to percent
         X_axis = np.linspace(AscanX_min,AscanX_max,sample_quantity)  #get the Thickness reading for the X-axis
         # try:
         #     print(CycleID,'Sampling Resol', AmplitudeSamplingDataRage_resolution)
         # except:
-        print(CycleID,max(DataBytes))
+        print('Cycle ID: ',CycleID, 'Peak Amplitude @ ',np.max(DataBytes),'Rate', self.acquisition.GetRate())
         # """Setup Threshold"""
         # amp_gate_lower_limit = 45
         # Xaxis_lower_limit = 26
@@ -186,8 +220,16 @@ class FPXDevice(object):
 
 
     def on_start(self):
-        while True:
-            self.collect_ascan()
+        status = self.acquisition.GetStateEx()
+        print(status)
+        # if status == self.acquisition.GetStateEx.Stopped:
+        if status == 1:
+            input('PRESS ENTER TO START TEST')
+            self.acquisition.Start()
+        # elif status == self.acquisition.GetStateEx.Started:
+        elif status == 0:
+            print("Test Started")
+
 
 
 
@@ -197,25 +239,33 @@ if __name__ == '__main__':
     package_name = "FocusPxPackage-1.4"
     fpx.download_firmware_package(package_name)
     fpx.create_beamset(4)
+    # fpx.create_conventionalUT_beamset_P_and_R(0,1)
     fpx.init_acquisition()
     fpx.acquisition.ApplyConfiguration()
+    input('PRESS ENTER TO START')
     fpx.acquisition.Start()
-    keyboard.add_hotkey('s',lambda:fpx.acquisition.Start())
+    # keyboard.add_hotkey('s',lambda:fpx.acquisition.Start())
+
+
+    keyboard.add_hotkey('s',lambda:fpx.on_start())
     keyboard.add_hotkey('q',lambda:fpx.acquisition.Stop())
+    keyboard.add_hotkey('h',lambda:fpx.switch_to_100())
+    keyboard.add_hotkey('o',lambda:fpx.switch_to_50())
     """
     Try 1
     """
-    # while True:
-    #     process_thread = Thread(target=fpx.collect_ascan)
-    #     process_thread.start()
-    #     process_thread.join()
-    #     # fpx.collect_ascan()
+    while True:
+        process_thread = Thread(target=fpx.collect_ascan,daemon=True)
+        # process_thread.daemon(Ture)
+        process_thread.start()
+        process_thread.join()
+    # fpx.collect_ascan()
 
 
     """
     Try2
     Should comment out Try1 when try to test this 
     """
-    process_thread = Thread(target=fpx.on_start)
-    process_thread.start()
-    process_thread.join
+    # process_thread = Thread(target=fpx.on_start)
+    # process_thread.start()
+    # process_thread.join
